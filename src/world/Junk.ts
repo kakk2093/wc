@@ -5,6 +5,7 @@ import { createToilet } from './ToiletProps.js';
 
 const PAPER = '#f2efe6';
 const CERAMIC = '#f4f1e8';
+const PISS = '#e6c21e';
 
 /**
  * Разбитый унитаз: тот же, что в туалете, но без кусков — без бачка или без крышки, со сколами по краю чаши;
@@ -42,6 +43,56 @@ export function createBrokenToilet(random: () => number): THREE.Group {
 		piece.position.set((random() - 0.5) * 1.2, 0.01, (random() - 0.5) * 1.2);
 		piece.rotation.set(random() * 3, random() * 3, random() * 3);
 		group.add(piece);
+	}
+	return group;
+}
+
+/**
+ * Обоссаный унитаз (для дна расщелины, его увеличивают в разы): фаянс пожелтел, вода в чаше — ярко-жёлтая,
+ * по чаше стекают жёлтые потёки, на сиденье — пятна, вокруг — лужа. Начало координат — на дне, чаша — к +Z.
+ */
+export function createPissedToilet(): THREE.Group {
+	const group = createToilet();
+	const yellowed = new THREE.MeshStandardMaterial({ color: '#eadc9c', roughness: 0.3 });
+	const [tank, , bowl, , water, seat, lid] = group.children as THREE.Mesh[];
+	for (const part of [tank, bowl, seat, lid]) part.material = yellowed;
+	water.material = new THREE.MeshStandardMaterial({ color: PISS, emissive: PISS, emissiveIntensity: 0.3 });
+	water.scale.set(2.2, 1, 2.8);
+
+	const stain = new THREE.MeshStandardMaterial({ color: PISS, transparent: true, opacity: 0.75, roughness: 0.2, side: THREE.DoubleSide });
+	// Потёки по передней стенке чаши: узкие полоски сверху вниз, разной длины.
+	for (const [x, length] of [
+		[-0.09, 0.3],
+		[-0.02, 0.22],
+		[0.05, 0.34],
+		[0.11, 0.18],
+	]) {
+		const drip = new THREE.Mesh(new THREE.PlaneGeometry(0.025, length), stain);
+		drip.position.set(x, 0.38 - length / 2, 0.38 + 0.23 - Math.abs(x) * 0.6);
+		drip.rotation.y = -x * 2.5;
+		group.add(drip);
+	}
+	// Пятна на сиденье.
+	for (const [x, z, r] of [
+		[-0.1, 0.5, 0.035],
+		[0.08, 0.3, 0.025],
+		[0.12, 0.47, 0.03],
+	]) {
+		const spot = new THREE.Mesh(new THREE.CircleGeometry(r, 8), stain);
+		spot.rotation.x = -Math.PI / 2;
+		spot.position.set(x, 0.432, z);
+		group.add(spot);
+	}
+	// Лужа вокруг — неровная: несколько кругов внахлёст.
+	for (const [x, z, r] of [
+		[0, 0.62, 0.32],
+		[0.22, 0.45, 0.2],
+		[-0.2, 0.7, 0.18],
+	]) {
+		const puddle = new THREE.Mesh(new THREE.CircleGeometry(r, 12), stain);
+		puddle.rotation.x = -Math.PI / 2;
+		puddle.position.set(x, 0.004, z);
+		group.add(puddle);
 	}
 	return group;
 }

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import type { CircleColliders } from '../physics/CircleColliders.js';
 import type { RoomBounds } from './Room.js';
-import { createPoop, POOP_HEIGHT, POOP_RADIUS } from './Poop.js';
-import { createBrokenToilet, createPaperRoll, PaperStrip } from './Junk.js';
+import { createPoop } from './Poop.js';
+import { createBrokenToilet, createPaperRoll, createPissedToilet, PaperStrip } from './Junk.js';
 
 /**
  * Подводный уровень — куда утаскивает мужик из унитаза: каньон, который уходит вперёд (на −Z). По бокам и сзади —
@@ -32,7 +32,7 @@ const BUBBLES = 320;
 const SCHOOLS = 5;
 const FISH_PER_SCHOOL = 9;
 const SHAFTS = 16;
-/** Мусор на дне: разбитые унитазы, какашки поменьше, рулоны бумаги (у части — размотанная лента вверх). */
+/** Мусор на дне: разбитые унитазы, какашки, рулоны бумаги (у части — размотанная лента вверх). */
 const BROKEN_TOILETS = 10;
 const SMALL_POOPS = 24;
 const ROLLS = 16;
@@ -42,7 +42,7 @@ const ROCK_MAX = 2;
 
 /**
  * Расщелина в конце каньона: прямоугольный провал в дне (по X — ±CREVICE_HALF, по Z — от CREVICE_NEAR до конца),
- * стенки — крутой спуск шириной CREVICE_EDGE. Чем ниже, тем темнее и тише; на дне — подсвеченная какашка.
+ * стенки — крутой спуск шириной CREVICE_EDGE. Чем ниже, тем темнее и тише; на дне — подсвеченный огромный обоссаный унитаз.
  */
 const CREVICE_HALF = 5;
 const CREVICE_NEAR = -LENGTH + 13;
@@ -56,17 +56,21 @@ const CREVICE_DEPTH = 100;
 const CREVICE_RIM = -1;
 /** На какой глубине (ниже кромки) свет и музыка гаснут совсем, м. */
 const DARK_DEPTH = 80;
-/** Какашка — посередине дна расщелины. */
-const POOP_Z = (CREVICE_NEAR - LENGTH) / 2;
+/**
+ * На дне расщелины — огромный обоссаный унитаз: во сколько раз больше обычного и где его начало (задняя стенка
+ * бачка) по Z — так, чтобы сам он встал посередине дна. Обычный унитаз — около 0.6 м в глубину.
+ */
+const BIG_TOILET_SCALE = 6;
+const BIG_TOILET_Z = (CREVICE_NEAR - LENGTH) / 2 - 0.3 * BIG_TOILET_SCALE;
 const BLACK = new THREE.Color('#000000');
 /** Свет у поверхности: рассеянный, сверху; дальность мути, м; яркость каустики. */
 const AMBIENT = 0.9;
 const SUN = 1.4;
 const FOG_FAR = 22;
 const CAUSTIC_OPACITY = 0.35;
-/** Луч на какашку: откуда светит (над ней) и сила. */
-const POOP_LIGHT_HEIGHT = 9;
-const POOP_LIGHT = 60;
+/** Луч на унитаз: откуда светит (над ним) и сила. */
+const BIG_TOILET_LIGHT_HEIGHT = 14;
+const BIG_TOILET_LIGHT = 110;
 
 /** Насколько точка внутри расщелины: 0 — снаружи, 1 — над её ровным дном; на стенках — между. */
 function creviceMask(x: number, z: number): number {
@@ -200,6 +204,13 @@ export class Underwater {
 	private readonly shafts: THREE.Mesh[] = [];
 	private readonly strips: PaperStrip[] = [];
 	private readonly surface: THREE.Texture;
+	/** Маркеры задач: над расщелиной (плыви вперёд) и над огромным унитазом на её дне. */
+	readonly creviceMarker = new THREE.Vector3(0, 1.5, CREVICE_NEAR - 4);
+	readonly bigToiletMarker = new THREE.Vector3(0, -CREVICE_DEPTH + 0.85 * BIG_TOILET_SCALE, BIG_TOILET_Z + 0.3 * BIG_TOILET_SCALE);
+	/** Моча в чаше огромного унитаза (вода из createToilet в его масштабе) — маркер «Смойся» и место смыва. */
+	readonly bigToiletWater = new THREE.Vector3(0, -CREVICE_DEPTH + 0.386 * BIG_TOILET_SCALE, BIG_TOILET_Z + 0.37 * BIG_TOILET_SCALE);
+	/** Где начинается расщелина по Z — доплыл сюда, и задача сменилась. */
+	readonly creviceStartZ = CREVICE_NEAR;
 	/** Свет и муть — их гасит глубина (setDepth). */
 	private readonly ambient = new THREE.AmbientLight('#f0d860', AMBIENT);
 	private readonly sun = new THREE.DirectionalLight('#fff1a8', SUN);
@@ -216,7 +227,7 @@ export class Underwater {
 		// Свет сверху, сквозь воду — холодный.
 		this.sun.position.set(3, 10, 2);
 		this.scene.add(this.sun);
-		this._buildPoop();
+		this._buildBigToilet();
 
 		const random = makeRandom(42);
 		this._buildFloor();
@@ -233,10 +244,19 @@ export class Underwater {
 
 	/** Высота дна под точкой — по ней ходит игрок. */
 	getHeightAt(x: number, z: number): number {
-		// Какашку не проплыть насквозь: над ней «дно» поднимается конусом.
-		const r = Math.hypot(x, z - POOP_Z);
-		const poop = r < POOP_RADIUS ? -CREVICE_DEPTH + POOP_HEIGHT * (1 - r / POOP_RADIUS) : -Infinity;
-		return Math.max(floorHeight(x, z), poop);
+		return Math.max(floorHeight(x, z), this._bigToiletTop(x, z));
+	}
+
+	/**
+	 * Огромный унитаз не проплыть насквозь: над ним «дно» — верх бачка или сиденье (грубо, по габаритам модели
+	 * из ToiletProps в его масштабе); вне его — −Infinity.
+	 */
+	private _bigToiletTop(x: number, z: number): number {
+		const lx = x / BIG_TOILET_SCALE;
+		const lz = (z - BIG_TOILET_Z) / BIG_TOILET_SCALE;
+		if (Math.abs(lx) <= 0.19 && lz >= 0 && lz <= 0.2) return -CREVICE_DEPTH + 0.8 * BIG_TOILET_SCALE;
+		if ((lx / 0.2) ** 2 + ((lz - 0.38) / 0.26) ** 2 <= 1) return -CREVICE_DEPTH + 0.43 * BIG_TOILET_SCALE;
+		return -Infinity;
 	}
 
 	update(dt: number): void {
@@ -313,15 +333,16 @@ export class Underwater {
 		pos.z = THREE.MathUtils.clamp(pos.z, -LENGTH + margin, CREVICE_NEAR - margin);
 	}
 
-	/** Какашка на дне расщелины и луч сверху прямо на неё — единственный свет в темноте. */
-	private _buildPoop(): void {
-		const poop = createPoop();
-		poop.position.set(0, -CREVICE_DEPTH, POOP_Z);
-		poop.rotation.y = 0.6;
-		this.scene.add(poop);
-		const spot = new THREE.SpotLight('#ffe2b0', POOP_LIGHT, 20, 0.5, 0.6, 1.2);
-		spot.position.set(0, -CREVICE_DEPTH + POOP_LIGHT_HEIGHT, POOP_Z + 1.5);
-		spot.target.position.set(0, -CREVICE_DEPTH + 1, POOP_Z);
+	/** Огромный обоссаный унитаз посередине дна расщелины и луч сверху прямо на него — единственный свет в темноте. */
+	private _buildBigToilet(): void {
+		const toilet = createPissedToilet();
+		toilet.scale.setScalar(BIG_TOILET_SCALE);
+		toilet.position.set(0, -CREVICE_DEPTH, BIG_TOILET_Z);
+		this.scene.add(toilet);
+		const center = BIG_TOILET_Z + 0.3 * BIG_TOILET_SCALE;
+		const spot = new THREE.SpotLight('#ffe2b0', BIG_TOILET_LIGHT, 30, 0.5, 0.6, 1.2);
+		spot.position.set(0, -CREVICE_DEPTH + BIG_TOILET_LIGHT_HEIGHT, center + 2.5);
+		spot.target.position.set(0, -CREVICE_DEPTH + 2, center);
 		this.scene.add(spot, spot.target);
 	}
 
@@ -343,7 +364,7 @@ export class Underwater {
 		}
 		for (let i = 0; i < SMALL_POOPS; i++) {
 			const poop = createPoop();
-			// Большая на дне расщелины — около 4 м в ширину; здесь — от ладони до полуметра.
+			// Модель — около 4 м в ширину; здесь — от ладони до полуметра.
 			poop.scale.setScalar(0.06 + random() * random() * 0.12);
 			place(poop, randomX(random), randomZ(random));
 		}

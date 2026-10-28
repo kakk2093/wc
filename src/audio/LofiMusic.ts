@@ -125,6 +125,18 @@ export class LofiMusic {
 		this.lowpass!.frequency.setTargetAtTime(on ? INTENSE_CUTOFF : MASTER_CUTOFF, t, 0.5);
 	}
 
+	/** Оборвать музыку разом — без затухания: тишина и больше ни одной ноты (start запустит заново). */
+	cut(): void {
+		if (this.timer !== null) {
+			clearInterval(this.timer);
+			this.timer = null;
+		}
+		if (!this.ctx) return;
+		const gain = this.master!.gain;
+		gain.cancelScheduledValues(this.ctx.currentTime);
+		gain.setValueAtTime(0, this.ctx.currentTime);
+	}
+
 	/** Приглушить: 1 — как есть, 0 — тишина (например, в глубине расщелины). Меняется плавно, можно звать каждый кадр. */
 	setFade(volume: number): void {
 		if (!this.ctx) return;

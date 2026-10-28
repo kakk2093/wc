@@ -58,6 +58,11 @@ export class PlayerController {
 	 */
 	underwater = false;
 	swimCeiling = Infinity;
+	/**
+	 * Размер игрока: 1 — человек, меньше — во столько раз ниже глаза, уже «тело» и шаг покачивания. Скорость, шаг
+	 * и прыжок — пропорционально корню из размера: жук бегает медленнее человека, но не ползёт.
+	 */
+	size = 1;
 	/** Фаза гребка (для рук) и насколько сильно сейчас гребём, 0..1. */
 	strokePhase = 0;
 	swimEffort = 0;
@@ -173,7 +178,7 @@ export class PlayerController {
 
 	private _groundEyeY(): number {
 		const { x, z } = this.camera.position;
-		return this.ground.getHeightAt(x, z) + EYE_HEIGHT;
+		return this.ground.getHeightAt(x, z) + EYE_HEIGHT * this.size;
 	}
 
 	/** Смещение глаз от покачивания сейчас (м): внизу — в момент шага, выше всего — в середине. */
@@ -201,14 +206,14 @@ export class PlayerController {
 		const pos = this.camera.position;
 
 		if (this.grounded && this.input.isDown('Space')) {
-			this.velocityY = JUMP_SPEED;
+			this.velocityY = JUMP_SPEED * this._pace();
 			this.grounded = false;
 		}
 
 		if (this.grounded) {
 			// Идём по земле: липнем к ней при небольшом спуске, иначе начинаем падать.
 			const targetY = this._groundEyeY();
-			if (pos.y - targetY - this._bobY() <= STEP_DOWN) {
+			if (pos.y - targetY - this._bobY() <= STEP_DOWN * this.size) {
 				pos.y = targetY + this._bobY();
 				return;
 			}
@@ -248,20 +253,20 @@ export class PlayerController {
 		const strafe = (input.isDown('KeyD') ? 1 : 0) - (input.isDown('KeyA') ? 1 : 0);
 
 		if (forward !== 0 || strafe !== 0) {
-			const speed = input.isDown('ShiftLeft') ? SPRINT_SPEED : WALK_SPEED;
+			const speed = (input.isDown('ShiftLeft') ? SPRINT_SPEED : WALK_SPEED) * this._pace();
 			// Движение только в горизонтальной плоскости, направление — по yaw.
 			this.move.set(strafe, 0, -forward).normalize().applyAxisAngle(THREE.Object3D.DEFAULT_UP, this.yaw);
 			pos.x += this.move.x * speed * dt;
 			pos.z += this.move.z * speed * dt;
 		}
 
-		this.colliders.resolve(pos, RADIUS);
+		this.colliders.resolve(pos, RADIUS * this.size);
 
 		// Шаги считаем по реально пройденному пути (упор в препятствие не даёт шагов).
 		const moved = Math.hypot(pos.x - startX, pos.z - startZ);
 		const sprint = input.isDown('ShiftLeft');
 		if (this.grounded) {
-			const stepLength = sprint ? SPRINT_STEP_LENGTH : STEP_LENGTH;
+			const stepLength = (sprint ? SPRINT_STEP_LENGTH : STEP_LENGTH) * this._pace();
 			this.stepDistance += moved;
 			this.bobPhase += (moved / stepLength) * Math.PI;
 			if (this.stepDistance >= stepLength) {
@@ -272,7 +277,7 @@ export class PlayerController {
 		// Покачивание — только пока идём по земле; остановился или в прыжке — плавно затихает.
 		const walking = this.grounded && moved > 0.0005;
 		this.bobWeight += ((walking ? 1 : 0) - this.bobWeight) * (1 - Math.exp(-dt * BOB_BLEND));
-		this.bobHeight += ((sprint ? SPRINT_BOB_HEIGHT : BOB_HEIGHT) - this.bobHeight) * (1 - Math.exp(-dt * BOB_BLEND));
+		this.bobHeight += ((sprint ? SPRINT_BOB_HEIGHT : BOB_HEIGHT) * this.size - this.bobHeight) * (1 - Math.exp(-dt * BOB_BLEND));
 		this._applyRotation();
 	}
 
@@ -311,5 +316,10 @@ export class PlayerController {
 		this.strokePhase += (this.swimVelocity.length() * STROKE_PER_METER + STROKE_IDLE * (1 - this.swimEffort)) * dt;
 		this.bobWeight = 0;
 		this._applyRotation();
+	}
+
+	/** Множитель скорости, длины шага и прыжка от размера (см. size). */
+	private _pace(): number {
+		return Math.sqrt(this.size);
 	}
 }

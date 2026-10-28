@@ -71,4 +71,130 @@ export class Sfx {
 			t += piece + (Math.random() < 0.25 ? 0.02 + Math.random() * 0.03 : 0);
 		}
 	}
+
+	/**
+	 * Смыв унитаза: шум воды нарастает, полоса фильтра ходит вверх-вниз (бульканье) и в конце уходит вниз —
+	 * вода уносится в трубу. duration — длина, с.
+	 */
+	flush(duration = 4): void {
+		const ctx = this._context();
+		if (ctx.state === 'suspended') void ctx.resume();
+		const t = ctx.currentTime + 0.01;
+		const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+		const data = buffer.getChannelData(0);
+		for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+		const noise = ctx.createBufferSource();
+		noise.buffer = buffer;
+		const filter = ctx.createBiquadFilter();
+		filter.type = 'bandpass';
+		filter.Q.value = 1.2;
+		filter.frequency.setValueAtTime(400, t);
+		filter.frequency.linearRampToValueAtTime(1400, t + duration * 0.3);
+		filter.frequency.exponentialRampToValueAtTime(180, t + duration);
+		// Бульканье — полоса быстро дрожит по высоте.
+		const lfo = ctx.createOscillator();
+		lfo.frequency.value = 9;
+		const lfoGain = ctx.createGain();
+		lfoGain.gain.value = 250;
+		lfo.connect(lfoGain);
+		lfoGain.connect(filter.frequency);
+		const gain = ctx.createGain();
+		gain.gain.setValueAtTime(0.0001, t);
+		gain.gain.linearRampToValueAtTime(0.35, t + 0.4);
+		gain.gain.setValueAtTime(0.35, t + duration * 0.6);
+		gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+		noise.connect(filter);
+		filter.connect(gain);
+		gain.connect(ctx.destination);
+		noise.start(t);
+		lfo.start(t);
+		lfo.stop(t + duration);
+	}
+
+	/** Громкий удар (дверь с ноги, топот по полу): глухой низкий «бум» и короткий треск. loud — громкость, 1 — обычный. */
+	bang(loud = 1): void {
+		const ctx = this._context();
+		if (ctx.state === 'suspended') void ctx.resume();
+		const t = ctx.currentTime + 0.005;
+		const boom = ctx.createOscillator();
+		boom.frequency.setValueAtTime(90, t);
+		boom.frequency.exponentialRampToValueAtTime(35, t + 0.3);
+		const boomGain = ctx.createGain();
+		boomGain.gain.setValueAtTime(0.7 * loud, t);
+		boomGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+		boom.connect(boomGain);
+		boomGain.connect(ctx.destination);
+		boom.start(t);
+		boom.stop(t + 0.55);
+		const length = Math.floor(ctx.sampleRate * 0.25);
+		const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+		const data = buffer.getChannelData(0);
+		for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3;
+		const crack = ctx.createBufferSource();
+		crack.buffer = buffer;
+		const filter = ctx.createBiquadFilter();
+		filter.type = 'lowpass';
+		filter.frequency.value = 2500;
+		const crackGain = ctx.createGain();
+		crackGain.gain.value = 0.5 * loud;
+		crack.connect(filter);
+		filter.connect(crackGain);
+		crackGain.connect(ctx.destination);
+		crack.start(t);
+	}
+
+	/** Телевизор выключили: щелчок кнопки и короткий писк кинескопа, уходящий вниз. */
+	tvOff(): void {
+		const ctx = this._context();
+		if (ctx.state === 'suspended') void ctx.resume();
+		const t = ctx.currentTime + 0.005;
+		const click = ctx.createOscillator();
+		click.type = 'square';
+		click.frequency.value = 1800;
+		const clickGain = ctx.createGain();
+		clickGain.gain.setValueAtTime(0.08, t);
+		clickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.02);
+		click.connect(clickGain);
+		clickGain.connect(ctx.destination);
+		click.start(t);
+		click.stop(t + 0.03);
+		const whine = ctx.createOscillator();
+		whine.type = 'sine';
+		whine.frequency.setValueAtTime(9000, t + 0.04);
+		whine.frequency.exponentialRampToValueAtTime(300, t + 0.4);
+		const whineGain = ctx.createGain();
+		whineGain.gain.setValueAtTime(0.05, t + 0.04);
+		whineGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+		whine.connect(whineGain);
+		whineGain.connect(ctx.destination);
+		whine.start(t + 0.04);
+		whine.stop(t + 0.5);
+	}
+
+	/** Гребок под водой: глухой «вжух» — шум через низкую полосу, которая проезжает вверх и обратно. loud — 0..1. */
+	stroke(loud = 1): void {
+		const ctx = this._context();
+		if (ctx.state === 'suspended') void ctx.resume();
+		const t = ctx.currentTime + 0.005;
+		const duration = 0.45;
+		const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+		const data = buffer.getChannelData(0);
+		for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+		const noise = ctx.createBufferSource();
+		noise.buffer = buffer;
+		const band = ctx.createBiquadFilter();
+		band.type = 'bandpass';
+		band.Q.value = 1.4;
+		band.frequency.setValueAtTime(220, t);
+		band.frequency.linearRampToValueAtTime(520 + Math.random() * 120, t + duration * 0.4);
+		band.frequency.exponentialRampToValueAtTime(180, t + duration);
+		const gain = ctx.createGain();
+		gain.gain.setValueAtTime(0.0001, t);
+		gain.gain.linearRampToValueAtTime(0.22 * loud, t + duration * 0.35);
+		gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+		noise.connect(band);
+		band.connect(gain);
+		gain.connect(ctx.destination);
+		noise.start(t);
+	}
 }

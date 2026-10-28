@@ -5,7 +5,7 @@ export type InteractionSound = 'tray' | 'bread' | 'dish' | 'card';
 export const PLAYER_NAME = '???';
 
 /** Чьим голосом «говорит» реплика — от этого зависит писк при печати текста. */
-export type Voice = 'dinnerLady' | 'cashier' | 'player' | 'toiletMan';
+export type Voice = 'dinnerLady' | 'cashier' | 'player' | 'toiletMan' | 'hooded';
 
 export interface DialogueLine {
 	speaker: string;

@@ -24,6 +24,12 @@ const STROKE: [number, THREE.Vector3][] = [
 const IDLE = new THREE.Vector3(0.18, -0.24, -0.36);
 const IDLE_RADIUS = new THREE.Vector2(0.04, 0.03);
 const FORWARD = new THREE.Vector3(0, 0, -1);
+/** Пузыри: сколько всего, сколько живёт пузырь (с), сколько в секунду срывается с каждой кисти при гребке во всю. */
+const BUBBLES = 80;
+const BUBBLE_LIFE = 1.6;
+const BUBBLE_RATE = 14;
+/** Изо рта: раз в сколько секунд (в среднем) — горстка пузырей перед лицом. */
+const BREATH_EVERY = 3.5;
 
 interface Arm {
 	side: number;
@@ -34,6 +40,15 @@ interface Arm {
 export class SwimArms {
 	/** Добавить в сцену подводного уровня; каждый кадр встаёт туда же, куда камера (update). */
 	readonly group = new THREE.Group();
+	/** Пузыри — в мире, а не у камеры (тоже добавить в сцену): сорвались с руки — и всплывают сами. */
+	readonly bubbles: THREE.Points;
+	private readonly bubblePos = new Float32Array(BUBBLES * 3);
+	private readonly bubbleAge = new Float32Array(BUBBLES).fill(BUBBLE_LIFE);
+	private nextBubble = 0;
+	/** Накопленная «доля» пузыря на каждую кисть и время до следующего выдоха. */
+	private readonly emit = [0, 0];
+	private breath = BREATH_EVERY;
+	private readonly world = new THREE.Vector3();
 	private readonly arms: Arm[] = [];
 	private readonly target = new THREE.Vector3();
 	private readonly idle = new THREE.Vector3();
@@ -54,10 +69,20 @@ export class SwimArms {
 			this.arms.push(arm);
 		}
 		this.group.visible = false;
+
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(this.bubblePos, 3));
+		this.bubbles = new THREE.Points(
+			geometry,
+			new THREE.PointsMaterial({ color: '#fff8d0', size: 0.025, transparent: true, opacity: 0.8, depthWrite: false })
+		);
+		this.bubbles.frustumCulled = false;
+		// Пока пузыря нет — он далеко внизу, его не видно.
+		for (let i = 0; i < BUBBLES; i++) this.bubblePos[i * 3 + 1] = -1000;
 	}
 
 	/** phase — фаза гребка (рад, растёт), effort — 0 (на месте) .. 1 (гребём во всю). */
-	update(camera: THREE.Camera, phase: number, effort: number): void {
+	update(camera: THREE.Camera, phase: number, effort: number, dt: number): void {
 		this.group.visible = true;
 		this.group.position.copy(camera.position);
 		this.group.quaternion.copy(camera.quaternion);
@@ -79,6 +104,49 @@ export class SwimArms {
 			arm.hand.position.copy(this.target);
 			arm.hand.quaternion.copy(arm.sleeve.quaternion);
 		}
+		this._updateBubbles(camera, effort, dt);
+	}
+
+	/** С кистей при гребке срываются пузыри, изредка — выдох перед лицом; все всплывают, виляя, и лопаются. */
+	private _updateBubbles(camera: THREE.Camera, effort: number, dt: number): void {
+		this.group.updateMatrixWorld();
+		this.arms.forEach((arm, i) => {
+			this.emit[i] += BUBBLE_RATE * effort * dt;
+			while (this.emit[i] >= 1) {
+				this.emit[i] -= 1;
+				this._spawn(arm.hand.getWorldPosition(this.world), 0.03);
+			}
+		});
+		this.breath -= dt * (0.5 + Math.random());
+		if (this.breath <= 0) {
+			this.breath = BREATH_EVERY;
+			// Выдох: чуть ниже и впереди глаз.
+			this.world.set(0, -0.12, -0.25).applyQuaternion(camera.quaternion).add(camera.position);
+			for (let i = 0; i < 6; i++) this._spawn(this.world, 0.04);
+		}
+		for (let i = 0; i < BUBBLES; i++) {
+			if (this.bubbleAge[i] >= BUBBLE_LIFE) continue;
+			this.bubbleAge[i] += dt;
+			const o = i * 3;
+			if (this.bubbleAge[i] >= BUBBLE_LIFE) {
+				this.bubblePos[o + 1] = -1000;
+				continue;
+			}
+			this.bubblePos[o] += Math.sin(this.bubbleAge[i] * 9 + i) * 0.12 * dt;
+			this.bubblePos[o + 1] += (0.5 + this.bubbleAge[i] * 0.6) * dt;
+			this.bubblePos[o + 2] += Math.cos(this.bubbleAge[i] * 7 + i) * 0.12 * dt;
+		}
+		(this.bubbles.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+	}
+
+	/** Новый пузырь в точке at с разбросом spread (м) — на место самого старого. */
+	private _spawn(at: THREE.Vector3, spread: number): void {
+		const o = this.nextBubble * 3;
+		this.bubblePos[o] = at.x + (Math.random() - 0.5) * spread;
+		this.bubblePos[o + 1] = at.y + (Math.random() - 0.5) * spread;
+		this.bubblePos[o + 2] = at.z + (Math.random() - 0.5) * spread;
+		this.bubbleAge[this.nextBubble] = 0;
+		this.nextBubble = (this.nextBubble + 1) % BUBBLES;
 	}
 
 	/** Положение правой кисти в брассе при фазе u (0..1): мягко между ключевыми точками. */

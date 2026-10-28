@@ -22,10 +22,33 @@
 		#flash {
 			position: fixed; inset: 0; opacity: 0; pointer-events: none; z-index: 1;
 		}
+		/* Стартовый экран — поверх жёлтой заливки: «надень наушники» и кнопка «Старт». */
+		#start {
+			position: fixed; inset: 0; z-index: 3; display: flex; flex-direction: column;
+			align-items: center; justify-content: center; gap: 28px; color: #2a2208;
+			font: 700 34px system-ui, sans-serif; text-align: center; padding: 0 16px;
+		}
+		#start svg { width: 96px; height: 96px; }
+		#start button {
+			font: 800 30px system-ui, sans-serif; letter-spacing: 0.08em; color: #f2d23a; background: #2a2208;
+			border: none; border-radius: 10px; padding: 16px 56px; cursor: pointer;
+			box-shadow: 0 6px 0 #120e03; transition: transform 0.08s, box-shadow 0.08s;
+		}
+		#start button:hover { background: #3a3010; }
+		#start button:active { transform: translateY(4px); box-shadow: 0 2px 0 #120e03; }
 	</style>
 </head>
 <body>
-	<div id="hint">Кликни, чтобы начать</div>
+	<div id="hint" style="display: none"></div>
+	<div id="start">
+		<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" aria-hidden="true">
+			<path d="M10 40 V32 a22 22 0 0 1 44 0 V40" />
+			<rect x="6" y="38" width="12" height="18" rx="4" fill="currentColor" />
+			<rect x="46" y="38" width="12" height="18" rx="4" fill="currentColor" />
+		</svg>
+		<div>Надень наушники</div>
+		<button id="start-button" type="button">СТАРТ</button>
+	</div>
 	<div id="prompt"></div>
 	<div id="flash" style="opacity: 1; background: #f2d23a"></div>
 	<script type="module" src="/src/main.ts"></script>

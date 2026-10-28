@@ -18,7 +18,17 @@ const HEAD_SIZE = new THREE.Vector3(0.17, 0.24, 0.19);
 /** Высота центра головы над низом модели — сюда смотрит камера в катсцене. */
 export const TOILET_MAN_FACE_Y = 0.6;
 
-export function createToiletMan(): THREE.Group {
+/** Длина ноги (от бедра до пола) и высота таза у мужика в полный рост, м. */
+export const TOILET_MAN_LEG = 0.82;
+const PELVIS = 0.2;
+const PANTS = '#25272b';
+const SHOE = '#111112';
+
+/**
+ * legs — в полный рост: снизу таз и ноги (узлы «legL»/«legR» — бедро, нога висит вниз), руки опущены вдоль тела;
+ * начало координат — у пола между ступнями. Без ног — только верх (для унитаза), начало — низ пиджака.
+ */
+export function createToiletMan(legs = false): THREE.Group {
 	const group = new THREE.Group();
 	const mat = (color: string) => new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
 	const box = (w: number, h: number, d: number, material: THREE.Material | THREE.Material[], x: number, y: number, z = 0) => {
@@ -74,6 +84,27 @@ export function createToiletMan(): THREE.Group {
 		shoulder.add(box(0.085, 0.3, 0.085, suit, 0, -0.15));
 		shoulder.add(box(0.07, 0.08, 0.05, skin, 0, -0.34));
 		group.add(shoulder);
+		if (legs) {
+			// В полный рост руки висят вдоль тела.
+			shoulder.rotation.set(0, 0, side * 0.12);
+		}
 	}
-	return group;
+	if (!legs) return group;
+
+	const root = new THREE.Group();
+	group.position.y = TOILET_MAN_LEG + PELVIS;
+	root.add(group);
+	root.add(box(0.34, PELVIS, 0.2, mat(PANTS), 0, TOILET_MAN_LEG + PELVIS / 2));
+	for (const side of [-1, 1]) {
+		const hip = new THREE.Group();
+		hip.name = side < 0 ? 'legL' : 'legR';
+		hip.position.set(side * 0.09, TOILET_MAN_LEG, 0);
+		hip.add(box(0.14, TOILET_MAN_LEG - 0.07, 0.16, mat(PANTS), 0, -(TOILET_MAN_LEG - 0.07) / 2));
+		// Ботинок — носком вперёд (+Z); имя — для Toilet: куда смотрит камера, когда на неё наступают.
+		const shoe = box(0.13, 0.07, 0.28, mat(SHOE), 0, -TOILET_MAN_LEG + 0.035, 0.05);
+		shoe.name = side < 0 ? 'shoeL' : 'shoeR';
+		hip.add(shoe);
+		root.add(hip);
+	}
+	return root;
 }

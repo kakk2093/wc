@@ -29,6 +29,12 @@ const SINK_X = -0.35;
 const TOILET_X = 0.42;
 const DOOR_WIDTH = 0.8;
 const DOOR_HEIGHT = 2.05;
+/** Глубина тёмного коридора за дверью, м — оттуда входит мужик. */
+const CORRIDOR_DEPTH = 3;
+/** Насколько распахивается дверь внутрь туалета, рад. */
+const DOOR_SWING = 1.75;
+/** Насколько мужик в полный рост может опустить голову, глядя на жука, рад. */
+const WALKER_LOOK_DOWN = 0.6;
 /** Тёплый жёлтый свет одной лампы под потолком. */
 const LAMP_COLOR = '#ffcf70';
 /** Где низ мужика из унитаза, когда он вылез: тело уходит в чашу, над ободком — грудь, руки и голова. */
@@ -42,6 +48,14 @@ export class Toilet {
 	readonly spawnPoint = { x: 0, z: SOUTH_Z - 0.7, yaw: 0 };
 	/** Дверь обратно — середина полотна на полу. */
 	readonly door = { x: 0, z: SOUTH_Z };
+	private readonly doorHinge = new THREE.Group();
+	/** Мужик в полный рост — входит в дверь (катсцена с жуком). Узлы: голова, ноги, ботинок правой. */
+	private readonly walker = createToiletMan(true);
+	private readonly walkerHead = this.walker.getObjectByName('head')!;
+	private readonly walkerLegs = [this.walker.getObjectByName('legL')!, this.walker.getObjectByName('legR')!];
+	private readonly walkerArms = [this.walker.getObjectByName('armL')!, this.walker.getObjectByName('armR')!];
+	private readonly walkerShoe = this.walker.getObjectByName('shoeR')!;
+	private readonly lookTarget = new THREE.Vector3();
 	/** Перед унитазом: отсюда подсказка «обоссать» (в пределах reach) и сюда встаёт игрок, глядя в чашу. */
 	readonly toiletSpot = { x: TOILET_X, z: NORTH_Z + 1.05, yaw: 0, pitch: -1.0, reach: 0.75 };
 	/** Куда ведёт маркер задачи в туалете — над чашей унитаза. */
@@ -71,6 +85,8 @@ export class Toilet {
 		this.man.visible = false;
 		this.man.position.set(TOILET_X, 0, NORTH_Z + 0.4);
 		this.scene.add(this.man);
+		this.walker.visible = false;
+		this.scene.add(this.walker);
 	}
 
 	/**
@@ -103,6 +119,42 @@ export class Toilet {
 			arm.scale.y = THREE.MathUtils.lerp(1, 2.8, reach);
 		}
 		this.man.position.y = THREE.MathUtils.lerp(MAN_BASE_Y, -0.7, THREE.MathUtils.clamp(sink, 0, 1));
+	}
+
+	/** Дверь: 0 — закрыта, 1 — распахнута внутрь (поворот на петле). */
+	openDoor(k: number): void {
+		this.doorHinge.rotation.y = Math.PI - DOOR_SWING * THREE.MathUtils.clamp(k, 0, 1);
+	}
+
+	/**
+	 * Мужик в полный рост в точке (0, z) — посередине проёма и дальше в туалет; смотрит на eye (голова — прямо в
+	 * глаза). walk — фаза шага (рад): ноги и руки ходят вразнобой; stomp 0..1 — правая нога поднята вперёд
+	 * (вместо шага), чтобы наступить.
+	 */
+	placeWalker(z: number, walk: number, stomp: number, eye: THREE.Vector3): void {
+		this.walker.visible = true;
+		this.walker.position.set(0, 0, z);
+		this.walker.rotation.y = Math.atan2(eye.x - this.walker.position.x, eye.z - z);
+		const swing = Math.sin(walk) * 0.45;
+		this.walkerLegs[0].rotation.x = swing;
+		this.walkerLegs[1].rotation.x = stomp > 0 ? -1.15 * stomp : -swing;
+		this.walkerArms[0].rotation.x = -swing * 0.8;
+		this.walkerArms[1].rotation.x = swing * 0.8;
+		this.walker.updateMatrixWorld();
+		// Голова смотрит на жука, но опускается не ниже WALKER_LOOK_DOWN — иначе лицо уходит в грудь.
+		const head = this.walkerHead.getWorldPosition(this.lookTarget);
+		const horizontal = Math.hypot(eye.x - head.x, eye.z - head.z);
+		const lowest = head.y - horizontal * Math.tan(WALKER_LOOK_DOWN);
+		this.walkerHead.lookAt(this.lookTarget.set(eye.x, Math.max(eye.y, lowest), eye.z));
+	}
+
+	/** Лицо мужика в полный рост и подошва его правого ботинка — в мире (out). */
+	walkerFace(out: THREE.Vector3): THREE.Vector3 {
+		return this.walkerHead.getWorldPosition(out);
+	}
+
+	walkerFoot(out: THREE.Vector3): THREE.Vector3 {
+		return this.walkerShoe.getWorldPosition(out);
 	}
 
 	/** Спрятать мужика (после того как утащил). */
@@ -155,7 +207,19 @@ export class Toilet {
 				roughness: 0.6,
 			});
 		wall(WIDTH, HEIGHT, tiles(WIDTH, HEIGHT, 1), 0, HEIGHT / 2, NORTH_Z, 0);
-		wall(WIDTH, HEIGHT, tiles(WIDTH, HEIGHT, 2), 0, HEIGHT / 2, SOUTH_Z, Math.PI);
+		// Южная стена — вокруг дверного проёма: слева, справа и над дверью (за дверью — тёмный коридор).
+		const side = (WIDTH - DOOR_WIDTH) / 2;
+		const lintel = HEIGHT - DOOR_HEIGHT;
+		wall(side, HEIGHT, tiles(side, HEIGHT, 2), -(DOOR_WIDTH + side) / 2, HEIGHT / 2, SOUTH_Z, Math.PI);
+		wall(side, HEIGHT, tiles(side, HEIGHT, 4), (DOOR_WIDTH + side) / 2, HEIGHT / 2, SOUTH_Z, Math.PI);
+		wall(DOOR_WIDTH, lintel, tiles(DOOR_WIDTH, lintel, 5), 0, DOOR_HEIGHT + lintel / 2, SOUTH_Z, Math.PI);
+		// Коридор за дверью — чёрная коробка изнутри: когда дверь распахнут, там ничего не видно.
+		const corridor = new THREE.Mesh(
+			new THREE.BoxGeometry(DOOR_WIDTH + 0.6, DOOR_HEIGHT + 0.2, CORRIDOR_DEPTH),
+			new THREE.MeshBasicMaterial({ color: '#000000', side: THREE.BackSide })
+		);
+		corridor.position.set(0, (DOOR_HEIGHT + 0.2) / 2, SOUTH_Z + CORRIDOR_DEPTH / 2 + 0.001);
+		this.scene.add(corridor);
 		wall(DEPTH, HEIGHT, new THREE.MeshStandardMaterial({ map: createWoodPanelTexture(), roughness: 0.5 }), -WIDTH / 2, HEIGHT / 2, 0, Math.PI / 2);
 		wall(DEPTH, HEIGHT, new THREE.MeshStandardMaterial({ color: '#e8dcb8' }), WIDTH / 2, HEIGHT / 2, 0, -Math.PI / 2);
 
@@ -176,10 +240,13 @@ export class Toilet {
 		shade.position.set(0, HEIGHT - 0.005, -0.2);
 		this.scene.add(shade);
 
+		// Дверь висит на петле у восточного края проёма; openDoor распахивает её внутрь туалета.
 		const door = createPlainDoor(DOOR_WIDTH, DOOR_HEIGHT);
-		door.position.set(0, 0, SOUTH_Z - 0.03);
-		door.rotation.y = Math.PI;
-		this.scene.add(door);
+		door.position.x = DOOR_WIDTH / 2;
+		this.doorHinge.position.set(DOOR_WIDTH / 2, 0, SOUTH_Z - 0.03);
+		this.doorHinge.rotation.y = Math.PI;
+		this.doorHinge.add(door);
+		this.scene.add(this.doorHinge);
 	}
 
 	/** Северная стена: раковина, над ней зеркало, правее — мыльница и полотенце; унитаз справа, бумага между ними. */

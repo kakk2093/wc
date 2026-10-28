@@ -42,7 +42,7 @@ export class TargetMarker {
 		document.body.appendChild(this.root);
 	}
 
-	/** point — цель в мире (null — скрыть). Расстояние в подписи — по горизонтали от камеры. */
+	/** point — цель в мире (null — скрыть). Расстояние в подписи — прямое от камеры, с высотой: цель бывает глубоко внизу. */
 	update(camera: THREE.Camera, point: THREE.Vector3 | null): void {
 		if (!point) {
 			this.root.style.display = 'none';
@@ -50,7 +50,7 @@ export class TargetMarker {
 		}
 		camera.updateMatrixWorld();
 		const cam = camera.position;
-		const distance = Math.hypot(point.x - cam.x, point.z - cam.z);
+		const distance = cam.distanceTo(point);
 		this.label.textContent = `${Math.max(1, Math.round(distance))} м`;
 		const view = this.view.copy(point).applyMatrix4(camera.matrixWorldInverse);
 		const ndc = this.ndc.copy(point).project(camera);
